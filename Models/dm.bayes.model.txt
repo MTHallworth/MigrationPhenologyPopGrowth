@@ -1,0 +1,127 @@
+
+model {
+##################################################################################################################
+#
+#  Priors
+#
+##################################################################################################################
+for(s in 1:nspp){
+   gam0[s] ~ dnorm(0, 0.01)
+   gam1[s] ~ dnorm(0, 0.01)
+   pInt[s] ~ dnorm(0, 0.01)
+
+for(i in 1:nschwarz){
+   alpha[i,s] ~ dnorm(0,0.01)
+} # nschwarz
+
+# Indicator variable
+   for (c in 1:ncovs){ 
+       #theta[s,c]~dnorm(mu.theta,tau.theta)
+ 	 #ind[s,c] ~ dbern(0.5)
+       #beta[s,c] <- theta[s,c] * ind[s,c]
+       beta[s,c]~dnorm(mu.theta,tau.theta)
+      } #ncovs
+#   for(c in 1:n0covs){
+#       #ind0[s,c]~ dbern(0.5)
+#       #beta0[s,c]<- theta[s,c] * ind0[s,c]
+# 	 #beta0[s,c]~dnorm(mu.theta,tau.theta)
+#      } #n0covs
+
+# Indicator variable for detection
+for (m in 1:pcovs){
+      #thetaP[s,m]~dnorm(mu.thetaP,tau.thetaP)
+      #indP[s,m]~dbern(0.5)
+      #betaP[s,m]<-thetaP[s,m]*indP[s,m]
+      betaP[s,m]~dnorm(mu.thetaP,tau.thetaP)  
+  } #pcovs
+for(k in 1:nyears){
+Error[k,s]~dnorm(0,0.01)
+}    #nyears
+}    #nspp
+
+### Hyperpriors #######
+mu.theta ~ dnorm(0,0.01)
+tau.theta ~ dgamma(0.001,0.001)
+mu.thetaP ~ dnorm(0,0.01)
+tau.thetaP ~ dgamma(0.001,0.001)
+
+
+#  Likelihood
+
+for(s in 1:nspp){                            # Species
+for(i in 1:nschwarz) {                       # Schwarz Plot
+     N[i,1,s] ~ dpois(lambda[i,1,s])
+     lambda[i,1,s]<-exp( alpha[i,s]+
+                         beta[spp[s],1]*Elev[i]+
+                         beta[spp[s],2]*Elev2[i]+
+                         beta[spp[s],3]*Slope[i]+
+                         beta[spp[s],4]*Aspect[i]+Error[1,s])                                                                        
+
+   for(j in 1:nreps) {                        # Replicates
+     y[i,j,1,s] ~ dbin(p[i,j,1,s], N[i,1,s]) 
+     p[i,j,1,s]<-1/(1+exp(-logit.p[i,j,1,s]))
+     logit.p[i,j,1,s]<-pInt[spp[s]]+betaP[spp[s],1]*time[i,j,1,s]+betaP[spp[s],2]*date[i,j,1,s]*betaP[spp[s],3]*obsvr[i,j,1,s]
+     } #REPS
+
+
+for(k in 2:4) {                      # Year 2000-2002
+     N[i,k,s] ~ dpois(gamma[i,k-1,s])
+     gamma[i,k-1,s] <- exp(gam0[spp[s]]+gam1[spp[s]]*N[i,k-1,s]+                                                            #PriorYear&Trend
+						beta[spp[s],1]*Elev[i]+beta[spp[s],2]*Elev2[i]+beta[spp[s],3]*Slope[i]+beta[spp[s],4]*Aspect[i]+Error[k,s])
+
+     for(j in 1:nreps){                      # Replicates
+     y[i,j,k,s] ~ dbin(p[i,j,k,s], N[i,k,s]) 
+     p[i,j,k,s]<-1/(1+exp(-logit.p[i,j,k,s]))
+     logit.p[i,j,k,s]<-pInt[spp[s]]+betaP[spp[s],1]*time[i,j,k,s]+betaP[spp[s],2]*date[i,j,k,s]+betaP[spp[s],3]*obsvr[i,j,k,s]
+
+     }    # REPS
+   }      # YEARS
+
+for(k in 5:6) {                      # Year 2003-2004 - years with no counts
+     N[i,k,s] ~ dpois(gamma[i,k-1,s])
+     gamma[i,k-1,s] <- exp(gam0[spp[s]]+gam1[spp[s]]*mean(N[i,k-1,s])+                                                            #PriorYear&Trend
+						beta[spp[s],1]*Elev[i]+beta[spp[s],2]*Elev2[i]+beta[spp[s],3]*Slope[i]+beta[spp[s],4]*Aspect[i]+Error[k,s])
+
+     for(j in 1:nreps){                      # Replicates
+     y[i,j,k,s] ~ dbin(p[i,j,k,s], N[i,k,s]) 
+     p[i,j,k,s]<-1/(1+exp(-logit.p[i,j,k,s]))
+     logit.p[i,j,k,s]<-pInt[spp[s]]+betaP[spp[s],1]*time[i,j,k,s]+betaP[spp[s],2]*date[i,j,k,s]+betaP[spp[s],3]*obsvr[i,j,k,s]
+
+     }    # REPS
+   }      # YEARS
+
+
+
+   for(k in 7:nyears) {                      # Year 2005-2014
+     N[i,k,s] ~ dpois(gamma[i,k-1,s])
+     gamma[i,k-1,s] <- exp(gam0[spp[s]]+gam1[spp[s]]*N[i,k-1,s]+                                                             #PriorYear&Trend
+						beta[spp[s],1]*Elev[i]+beta[spp[s],2]*Elev2[i]+beta[spp[s],3]*Slope[i]+beta[spp[s],4]*Aspect[i]+Error[k,s] )
+
+     for(j in 1:nreps){                      # Replicates
+     y[i,j,k,s] ~ dbin(p[i,j,k,s], N[i,k,s]) 
+     p[i,j,k,s]<-1/(1+exp(-logit.p[i,j,k,s]))
+     logit.p[i,j,k,s]<-pInt[spp[s]]+betaP[spp[s],1]*time[i,j,k,s]+betaP[spp[s],2]*date[i,j,k,s]+betaP[spp[s],3]*obsvr[i,j,k,s]
+
+     }    # REPS
+   }      # YEARS
+ }        # SITES
+}         # SPECIES
+
+#############################################################################################################################
+#############################################################################################################################
+#
+# Derived parameters 
+#
+#############################################################################################################################
+#############################################################################################################################
+
+# Calculate the population size sampled at HBEF in each year, k.
+
+for(s in 1:nspp){
+for(k in 1:nyears) {
+  Ntot[k,s] <- sum(N[,k,s])
+  }
+}
+
+} # END MODEL
+

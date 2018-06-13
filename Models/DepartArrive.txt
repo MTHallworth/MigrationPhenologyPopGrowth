@@ -1,0 +1,81 @@
+model {
+
+# Prior distributions
+
+# non-breeding priors #
+Int.nb~dnorm(mu.int.nb,tau.int.nb)
+mu.int.nb~dnorm(0,0.001)
+tau.int.nb<-(1/sigma.int.nb*sigma.int.nb)
+sigma.int.nb~dunif(0,100)
+
+slope.nb~dnorm(0,0.001)
+tau.slope.nb<-1/(sigma.slope.nb*sigma.slope.nb)
+sigma.slope.nb~dunif(0,100)
+
+# spring migration rate parameters #
+Int.sp.mig~dnorm(mu.int.sp.mig,tau.int.sp.mig)
+mu.int.sp.mig~dnorm(0,0.001)
+tau.int.sp.mig<-(1/sigma.int.sp.mig*sigma.int.sp.mig)
+sigma.int.sp.mig~dunif(0,100)
+
+slope.sp.mig~dnorm(0,0.001)
+tau.slope.sp.mig<-1/(sigma.slope.sp.mig*sigma.slope.sp.mig)
+sigma.slope.sp.mig~dunif(0,100)
+
+# Breeding priors #
+Int.b~dnorm(mu.int.b,tau.int.b)
+mu.int.b~dnorm(0,0.001)
+tau.int.b<-(1/sigma.int.b*sigma.int.b)
+sigma.int.b~dunif(0,100)
+
+slope.b~dnorm(0,0.001)
+tau.slope.b<-1/(sigma.slope.b*sigma.slope.b)
+sigma.slope.b~dunif(0,100)
+
+# fall migration rate parameters #
+Int.f.mig~dnorm(mu.int.f.mig,tau.int.f.mig)
+mu.int.f.mig~dnorm(0,0.001)
+tau.int.f.mig<-(1/sigma.int.sp.mig*sigma.int.f.mig)
+sigma.int.f.mig~dunif(0,100)
+
+slope.f.mig~dnorm(0,0.001)
+tau.slope.f.mig<-1/(sigma.slope.f.mig*sigma.slope.f.mig)
+sigma.slope.f.mig~dunif(0,100)
+
+
+# Likelihood 
+# Non-breeding departure #
+for (i in 1:(AllBirds-3)){
+arrive.b[i]~dnorm(mu.b[i],tau.int.nb)
+mu.b[i]<-Int.nb+slope.nb*departure.nb[i]
+}
+# Breeding departure #
+for(i in 1:AllBirds){
+arrive.nb[i]~dnorm(mu.nb[i],tau.int.b)
+mu.nb[i] <- Int.b+slope.b*departure.b[i]
+}
+
+# Migration Rate 
+
+# Spring Migration #
+#for(i in 1:(AllBirds-3)){
+for (i in c(1:2,4:(AllBirds-3))){
+sp.mig.rate[i]~dnorm(mu.sp.mig[i],tau.int.sp.mig)
+mu.sp.mig[i]<-Int.sp.mig+slope.sp.mig*departure.nb[i]
+}
+# Fall Migration #
+#for(i in 1:AllBirds){
+for(i in c(1:7,9:AllBirds)){ # This removes the outlier
+f.mig.rate[i]~dnorm(mu.f.mig[i],tau.int.f.mig)
+mu.f.mig[i]<-Int.f.mig+slope.f.mig*departure.b[i]
+}
+
+# Derived parameters #
+for(i in 1:100){
+b.arrive[i]~dnorm(Int.nb+slope.nb*nb.depart[i],tau.int.nb)
+nb.arrive[i]~dnorm(Int.b+slope.b*b.depart[i],tau.int.b)
+
+sp.mig.est[i]~dnorm(Int.sp.mig+slope.sp.mig*nb.depart[i],tau.int.sp.mig)
+f.mig.est[i]~dnorm(Int.f.mig+slope.f.mig*b.depart[i],tau.int.f.mig)
+}
+}

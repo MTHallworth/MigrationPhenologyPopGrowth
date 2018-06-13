@@ -1,0 +1,187 @@
+model{
+# Integrated population model for OVEN seasonal interaction Manuscript
+
+########################################################################
+#
+#              SURVIVAL
+#
+########################################################################
+
+  # Priors and constraints
+
+mean.phi ~ dunif(0,1)
+mean.p ~ dunif(0,1)
+
+for (i in 1:inds){
+   for (t in FirstCap[i]:(nyears-1)){
+      phi[i,t] <- mean.phi
+      phi.p[i,t] <- mean.p
+      } #t
+   } #i
+
+  #########################################################################
+  #### Movement error 
+  #########################################################################
+  for(m in 1:2){
+    sigma[m] ~ dunif(0, 2000)          # movement Error
+    tau[m] <- 1/(sigma[m]*sigma[m])    # movement Error 
+  } # m
+
+
+########################################################################
+# SURVIVAL CONSTRAINTS 
+########################################################################
+
+for (i in 1:inds){                # Number individuals 
+  
+# Define latent state at first capture
+
+   z[i,FirstCap[i]] <- 1
+  
+  for (t in (FirstCap[i]+1):nyears){
+    
+    # State processes
+    # Survival
+    # Dispersal
+    FoundLocs[i,t,1] ~ dnorm(FoundLocs[i,t-1,1], tau[1])T(xlim[1],xlim[2])
+    FoundLocs[i,t,2] ~ dnorm(FoundLocs[i,t-1,2], tau[2])T(ylim[1],ylim[2])
+
+    # Movement - dispersal distance 
+      
+    d[i,t] <- pow(pow(FoundLocs[i,t,1]-FoundLocs[i,t-1,1],2)+pow(FoundLocs[i,t,2]-FoundLocs[i,t-1,2],2),0.5)
+
+    # Observation process
+    # Test whether the actual location is in- or outside the state-space
+    
+    for (g in 1:ngrids){
+      
+      inPlot[i,t,g]<-(step(FoundLocs[i,t,1] - grid.study.boundaries[g,1,t])* # x - xmin
+                        step(grid.study.boundaries[g,2,t] - FoundLocs[i,t,1])* # xmax - x
+                        step(FoundLocs[i,t,2] - grid.study.boundaries[g,3,t])* # y - ymin
+                        step(grid.study.boundaries[g,4,t] - FoundLocs[i,t,2])) # ymax - y
+    } # g
+    
+    avail[i,t]<-sum(inPlot[i,t,])
+    
+    # Detection bernouli trial
+    # Is bird alive or dead - if alive previous year (1) then chances of survival 
+    # times survival of previous year
+
+
+     z[i,t] ~ dbern(phi[i,t-1] * z[i,t-1])
+
+
+    # Capture History - coin flip of detection, alive and available. 
+    
+    CH[i,t] ~ dbern(phi.p[i,t-1]  * z[i,t] * avail[i,t])
+    
+  } #t
+} # i 
+
+#############################################################################################################
+#
+# FECUNDITY 
+#
+#############################################################################################################
+# Pairing success #
+
+# Priors 
+alpha~dnorm(mu.int,tau.int)   
+beta~dnorm(mu.slope,tau.slope)
+
+mu.int~dnorm(0,0.001)
+tau.int<-1/(sigma.int*sigma.int)
+sigma.int~dunif(0,100)
+
+mu.slope~dnorm(0,0.001)
+tau.slope<-1/(sigma.slope*sigma.slope)
+sigma.slope~dunif(0,100)
+
+tau<-1/(sigma*sigma)
+sigma~dunif(0,100)
+
+# Likelihood
+for (i in 1:Birds){
+Paired[i]~dbern(p.pair[i])
+logit(p.pair[i])<-alpha+beta*ArrivalDate[i]
+}
+
+mean.pair <- sum(Paired[])/length(Paired[]) 
+
+# Nest survival model #
+nest.surv~dunif(0,1)
+
+for (i in 1:Nests){
+     for (t in (first.nest[i]+1):(last.nest[i])){
+          logit(phi.nest[i,t])<-nest.surv
+         }#t
+      }#i
+
+#### Likelihood 
+for (i in 1:Nests){
+    for(j in (first.nest[i]+1):last.nest[i]){
+        mu.nest[i,j]<-phi.nest[i,j]*nest.ch[i,j-1]
+        nest.ch[i,j]~dbern(mu.nest[i,j])
+        }#j
+     }#i
+
+#############################################################################################################
+#
+# N-mixture model portion to estimate population size 
+#
+#############################################################################################################
+
+# ABUNDANCE MODEL 
+#############################################################################################################
+#
+#  Likelihood
+#
+#############################################################################################################
+   for(i in 1:nschwarz) {                       # Schwarz Plot
+
+       N[i,1] ~ dpois(lambda[i,1])T(0,10)
+
+       lambda[i,1]<-exp(alpha+
+                        beta[1]*Elev[i]+
+                        Error[1])                                                                        
+
+   	for(j in 1:nreps) {                        # Replicates
+     	    y[i,j,1] ~ dbin(N.p[i,j,1], N[i,1]) 
+     	    p[i,j,1]<-1/(1+exp(-logit.p[i,j,1]))
+     	    logit.p[i,j,1]<-pInt+
+                       	      betaP[1]*time[i,j,1]+
+                       	      betaP[2]*date[i,j,1]+
+                              betaP[3]*obsvr[i,j,1]
+} #REPS
+
+#######################################################
+for(k in 2:nyears) {  
+
+S[i,k-1] ~ dbin(mean.phi,N[i,k-1])    # Survival
+
+G[i,k-1] ~ dpois(Gamma[i,k-1])T(0,10) # Recruits
+
+#recruits.ha[i,k-1]<-G[i,k-1]/(area/10000)
+
+Gamma[i,k-1] <- N[i,k-1]*
+                ((0.5*BroodSize)*pow(nest.surv,24)*(1+Renest-pow(nest.surv,24)*Renest+DoubleBrood)*mean.pair)*JuvSurv
+
+N[i,k] ~ dpois(Npred[i,k,s])T(0,10)
+
+Npred[i,k] <- S[i,k-1] + G[i,k-1]
+
+for(j in 1:nreps) {                        # Replicates
+
+    y[i,j,k] ~ dbin(N.p[i,j,k], N[i,k]) 
+
+    N.p[i,j,k]<-1/(1+exp(-logit.p[i,j,k]))
+
+    logit.p[i,j,k]<-pInt+
+                    betaP[1]*time[i,j,k]+
+                    betaP[2]*date[i,j,k]+
+                    betaP[3]*obsvr[i,j,k]
+          } #REPS
+       } # Years
+   }        # SITES
+}         # SPECIES
+} 

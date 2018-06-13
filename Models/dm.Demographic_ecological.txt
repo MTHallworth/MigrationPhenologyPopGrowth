@@ -1,0 +1,163 @@
+
+model {
+##################################################################################################################
+#
+#  Priors
+#
+##################################################################################################################
+for(s in 1:nspp){
+   gam0[s] ~ dnorm(0, 0.01)
+   gam1[s] ~ dnorm(0, 0.01)
+   pInt[s] ~ dnorm(0, 0.01)
+   alpha[s] ~ dnorm(0,0.01)
+
+# Beta coefficients
+   for (c in 1:ncovs){ 
+       beta[s,c]~dnorm(0,0.01)
+      } #ncovs
+
+# Beta coefficients
+for (m in 1:pcovs){
+      betaP[s,m]~dnorm(0,0.01)  
+  } #pcovs
+}    #nspp
+
+for(k in 1:nyears){
+Error[k]~dnorm(0,0.01)
+}    #nyears
+
+radius <- 50
+area <- pi*pow(radius,2)
+
+##################################################################################################################
+#
+#  Likelihood
+#
+##################################################################################################################
+for(s in 1:nspp){                            # Species
+   for(i in 1:nschwarz) {                       # Schwarz Plot
+
+   # Species specific survival
+       phi.s[i,s] ~ dunif(0.3,0.7)                  # prior for survival
+
+       N[i,1,s] ~ dpois(lambda[i,1,s])T(0,10)
+       lambda[i,1,s]<-exp(alpha[s]+
+                          beta[spp[s],1]*ThermalSum[i,1]+
+                          beta[spp[s],2]*StrComplex[i]+
+                          beta[spp[s],3]*Precip[i,1]+
+                          beta[spp[s],4]*JuneTemp[i]+
+                          Error[1])                                                                        
+
+   	for(j in 1:nreps) {                        # Replicates
+     	    y[i,j,1,s] ~ dbin(p[i,j,1,s], N[i,1,s]) 
+     	    p[i,j,1,s]<-1/(1+exp(-logit.p[i,j,1,s]))
+     	    logit.p[i,j,1,s]<-pInt[spp[s]]+
+                       	      betaP[spp[s],1]*time[i,j,1,s]+
+                       	      betaP[spp[s],2]*date[i,j,1,s]+
+                              betaP[spp[s],3]*obsvr[i,j,1,s]
+} #REPS
+
+##################### Year 2000-2015 ##################################
+for(k in 2:nyears) {  
+
+# Compute local density (prop of occupied neighbouring cells) for
+      # use as autologistic covariate
+      for (m in 1:cardneigh[i]){
+        # Estimated Abundance of all neighbours
+        ConnSite[i,m,k-1,s] <- N[adjmat[i,m], k-1,s]
+      }
+
+# Average number of interacting individuals (auto-covariate)
+      D[i,k-1,s] <- sum(ConnSite[i, 1:cardneigh[i], k-1,s]) / cardneigh[i]
+	  
+S[i,k-1,s] ~ dbin(phi.s[i,s],N[i,k-1,s])    # Survival
+
+G[i,k-1,s] ~ dpois(Gamma[i,k-1,s])T(0,10) # Recruits
+
+recruits.ha[i,k-1,s]<-G[i,k-1,s]/(area/10000)
+
+Gamma[i,k-1,s] <- exp(gam0[s]+
+                      gam1[s]*N[i,k-1,s]+ # Density Dependence 
+		      gam2[s]*D[i,k-1,s] + # Neighbor density # Conspecific attraction 
+                      beta[spp[s],1]*ThermalSum[i,k]+
+                      beta[spp[s],2]*StrComplex[i]+
+                      beta[spp[s],3]*Precip[i,k]+
+                      beta[spp[s],4]*JuneTemp[i]+
+                      Error[k])  
+
+N[i,k,s] ~ dpois(Npred[i,k,s])T(0,10)
+
+Npred[i,k,s] <- S[i,k-1,s] + G[i,k-1,s]
+
+for(j in 1:nreps) {                        # Replicates
+
+    y[i,j,k,s] ~ dbin(p[i,j,k,s], N[i,k,s]) 
+
+    p[i,j,k,s]<-1/(1+exp(-logit.p[i,j,k,s]))
+
+    logit.p[i,j,k,s]<-pInt[spp[s]]+
+                           betaP[spp[s],1]*time[i,j,k,s]+
+                           betaP[spp[s],2]*date[i,j,k,s]+
+                           betaP[spp[s],3]*obsvr[i,j,k,s]
+          } #REPS
+       } # Years
+   }        # SITES
+}         # SPECIES
+
+#############################################################################################################################
+#############################################################################################################################
+#
+# Derived parameters 
+#
+#############################################################################################################################
+#############################################################################################################################
+# Calculate the population size sampled at HBEF in each year, k.
+
+for(s in 1:nspp){
+for(k in 1:nyears) {
+  Ntot[k,s] <- sum(N[,k,s])
+  } # nyears
+
+# valley-wide survival # 
+mean.phi[s] <- mean(phi.s[,s])
+}# species
+
+
+# Rank order of abundance 
+for(k in 1:nyears){
+ for(i in 1:nschwarz){
+ranked.order[i,k,1:nspp] <- rank(-N[i,k,])
+log.abund[i,k,1:nspp] <- log(N[i,k,]+0.00001/sum(N[i,k,]))
+ } # nschwarz
+ranked.vw[k,1:nspp] <- rank(-Ntot[k,])
+log.abund.vw[k,1:nspp] <- log(Ntot[k,]/sum(Ntot[k,]))
+}  # nyears
+
+
+# Valley Wide Recruitment Estimates
+for(k in 1:(nyears-1)){
+for(s in 1:nspp){
+VW.recruit[s,k] <- sum(G[,k,s])/((area/10000)*nschwarz)
+}# species
+}# years
+
+
+
+# Species specific population growth rates
+
+for(i in 1:nschwarz){
+for(s in 1:nspp){
+# This tests if phi.s is equivalent - it never is 
+# and it takes up a ton of RAM
+#for(l in 1:nspp){
+#Same.Phi[l,s,i] <- equals(phi.s[i,l],phi.s[i,s])
+#} # nspp (l)
+for(k in 2:nyears){
+Spp.growth[i,k,s] <- (N[i,k,s]+1)/(N[i,k-1,s]+1)
+
+  } # nspp
+ } # nyears
+} # nschwarz
+
+#End Model
+}

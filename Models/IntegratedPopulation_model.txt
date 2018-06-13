@@ -1,0 +1,453 @@
+model{
+# Integrated population model for OVEN seasonal interaction Manuscript
+
+########################################################################
+#
+#              SURVIVAL
+#
+########################################################################
+
+  # Priors and constraints
+
+mean.phi ~ dunif(0,1)
+mean.p ~ dunif(0,1)
+
+for (i in 1:inds){
+   for (t in FirstCap[i]:(n.years-1)){
+      phi[i,t] <- mean.phi
+      phi.p[i,t] <- mean.p
+      } #t
+   } #i
+
+  #########################################################################
+  #### Movement error 
+  #########################################################################
+  for(m in 1:2){
+    sigma[m] ~ dunif(0, 2000)          # movement Error
+    tau[m] <- 1/(sigma[m]*sigma[m])    # movement Error 
+  } # m
+
+
+########################################################################
+# SURVIVAL CONSTRAINTS 
+########################################################################
+
+for (i in 1:inds){                # Number individuals 
+  
+# Define latent state at first capture
+
+   z[i,FirstCap[i]] <- 1
+  
+  for (t in (FirstCap[i]+1):n.years){
+    
+    # State processes
+    # Survival
+    # Dispersal
+    FoundLocs[i,t,1] ~ dnorm(FoundLocs[i,t-1,1], tau[1])T(xlim[1],xlim[2])
+    FoundLocs[i,t,2] ~ dnorm(FoundLocs[i,t-1,2], tau[2])T(ylim[1],ylim[2])
+
+    # Movement - dispersal distance 
+      
+    d[i,t] <- pow(pow(FoundLocs[i,t,1]-FoundLocs[i,t-1,1],2)+pow(FoundLocs[i,t,2]-FoundLocs[i,t-1,2],2),0.5)
+
+    # Observation process
+    # Test whether the actual location is in- or outside the state-space
+    
+    for (g in 1:ngrids){
+      
+      inPlot[i,t,g]<-(step(FoundLocs[i,t,1] - grid.study.boundaries[g,1,t])*   # x - xmin
+                        step(grid.study.boundaries[g,2,t] - FoundLocs[i,t,1])* # xmax - x
+                        step(FoundLocs[i,t,2] - grid.study.boundaries[g,3,t])* # y - ymin
+                        step(grid.study.boundaries[g,4,t] - FoundLocs[i,t,2])) # ymax - y
+    } # g
+    
+    avail[i,t]<-sum(inPlot[i,t,])
+    
+    # Detection bernouli trial
+    # Is bird alive or dead - if alive previous year (1) then chances of survival 
+    # times survival of previous year
+
+
+     z[i,t] ~ dbern(phi[i,t-1] * z[i,t-1])
+
+
+    # Capture History - coin flip of detection, alive and available. 
+    
+    CH[i,t] ~ dbern(phi.p[i,t-1]  * z[i,t] * avail[i,t])
+    
+  } #t
+} # i 
+
+
+#############################################################################################################
+#
+# CONDITION METRICS 
+#
+#############################################################################################################
+# # # # # # # # # # # # 
+#   Arrival Condtion  #
+# # # # # # # # # # # #
+# Priors 
+a.arrive.con~dnorm(a.con.int,a.con.tau)  
+
+beta.arrival.con~dnorm(mu.slope.con,tau.slope.con)
+
+a.con.int~dnorm(0,0.001)
+a.con.tau<-1/(sigma.con.int*sigma.con.int)
+sigma.con.int~dunif(0,100)
+
+mu.slope.con~dnorm(0,0.001)
+tau.slope.con<-1/(sigma.slope.con*sigma.slope.con)
+sigma.slope.con~dunif(0,100)
+
+tau.con<-1/(sigma.con*sigma.con)
+sigma.con~dunif(0,100)
+
+# Likelihood
+for (i in 1:nCond){
+ArriveCond[i]~dnorm(mu.con[i],tau.con)
+mu.con[i]<-a.arrive.con+beta.arrival.con*ArriveDateCond[i]
+}
+
+# # # # # # # # # # # #
+#  Change in condtion #
+# # # # # # # # # # # #
+# Priors 
+a.change~dnorm(mu.int.change,tau.int.change)  
+
+beta.change~dnorm(mu.slope.change,tau.slope.change)
+
+mu.int.change~dnorm(0,0.001)
+tau.int.change<-1/(sigma.int.change*sigma.int.change)
+sigma.int.change~dunif(0,100)
+
+mu.slope.change~dnorm(0,0.001)
+tau.slope.change<-1/(sigma.slope.change*sigma.slope.change)
+sigma.slope.change~dunif(0,100)
+
+tau.change<-1/(sigma.change*sigma.change)
+sigma.change~dunif(0,100)
+
+# Likelihood
+for (i in 1:nChange){
+ChangeCond[i]~dnorm(mu.change[i],tau.change)
+mu.change[i]<-a.change+beta.change*ChangeDate[i]
+}
+
+#############################################################################################################
+#
+# FECUNDITY 
+#
+#############################################################################################################
+# # # # # # # # # # 
+# Pairing success #
+# # # # # # # # # # 
+
+# Priors 
+alpha.pair~dnorm(mu.int.p,tau.int.p)                  #prior for intercept pairing
+beta.pair~dnorm(mu.slope.p,tau.slope.p)               #prior for slope pairing
+ 
+mu.int.p~dnorm(0,0.001)                           #superprior for pairing intercept
+tau.int.p<-1/(sigma.int.p*sigma.int.p)            #superprior for pairing intercept
+sigma.int.p~dunif(0,100)                          #superprior for pairing intercept
+
+mu.slope.p~dnorm(0,0.001)                         #superprior for pairing slope
+tau.slope.p<-1/(sigma.slope.p*sigma.slope.p)      #superprior for pairing slope
+sigma.slope.p~dunif(0,100)                        #superprior for pairing slope
+
+# Likelihood
+for (i in 1:nPair){
+Paired[i]~dbern(p.pair[i])
+logit(p.pair[i])<-alpha.pair+beta.pair*ArrivalDate[i]
+}
+
+mean.pair <- sum(p.pair[])/length(p.pair[]) 
+
+# # # # # # # # # # 
+#   PAIR DATE     #
+# # # # # # # # # # 
+
+# Priors 
+alpha.pd~dnorm(mu.int.pd,tau.int.pd) 
+
+beta.pair.date~dnorm(mu.slope.pd,tau.slope.pd)
+
+mu.int.pd~dnorm(0,0.001)
+tau.int.pd<-1/(sigma.int.pd*sigma.int.pd)
+sigma.int.pd~dunif(0,100)
+
+mu.slope.pd~dnorm(0,0.001)
+tau.slope.pd<-1/(sigma.slope.pd*sigma.slope.pd)
+sigma.slope.pd~dunif(0,100)
+
+tau.pd<-1/(sigma.pd*sigma.pd)
+sigma.pd~dunif(0,100)
+
+# Likelihood
+for (i in 1:nPairDate){
+PairDate150[i]~dnorm(mu.pd[i],tau.pd)
+mu.pd[i]<-alpha.pd+beta.pair.date*ArrivalDatePair[i]
+}
+
+# # # # # # # # # # # #
+# CLUTCH COMPLETION   #
+# # # # # # # # # # # #
+# Priors 
+alpha.FstClutch~dnorm(mu.int.fc,tau.int.fc)
+beta.FstClutch~dnorm(slope.fc,tau.slope.fc)
+
+mu.int.fc~dnorm(0,0.001)
+tau.int.fc<-1/(sigma.int.fc*sigma.int.fc)
+sigma.int.fc~dunif(0,100)
+
+slope.fc~dnorm(0,0.001)
+tau.slope.fc<-1/(sigma.slope.fc*sigma.slope.fc)
+sigma.slope.fc~dunif(0,100)
+
+tau.fc<-1/(sigma.fc*sigma.fc)
+sigma.fc~dunif(0,100)
+
+# Likelihood
+for (i in 1:clutchbirds){
+ClutchComplete[i]~dnorm(mu.fc[i],tau.fc)
+mu.fc[i]<-alpha.FstClutch+beta.FstClutch*clutcharrive[i]
+}
+
+# # # # # # # # # # # # # # #
+# CLUTCH COMPLETION FLEDGED #
+# # # # # # # # # # # # # # #
+# Priors 
+alpha.ClutchFldg~dnorm(mu.int.CFldg,tau.int.CFldg)
+beta.ClutchFldg~dnorm(slope.CFldg,tau.slope.CFldg)
+
+mu.int.CFldg~dnorm(0,0.001)
+tau.int.CFldg<-1/(sigma.int.CFldg*sigma.int.CFldg)
+sigma.int.CFldg~dunif(0,100)
+
+slope.CFldg~dnorm(0,0.001)
+tau.slope.CFldg<-1/(sigma.slope.CFldg*sigma.slope.CFldg)
+sigma.slope.CFldg~dunif(0,100)
+
+tau.CFldg<-1/(sigma.CFldg*sigma.CFldg)
+sigma.CFldg~dunif(0,100)
+
+omega1 ~ dunif(0.45,0.55)
+# Likelihood #ZIP MODEL 
+for (i in 1:nC.Fledge){
+abc[i] ~ dbern(omega1)
+clutchFledged[i]~dpois(abc[i]*exp.clutch.fledged[i])T(0,8)
+log(exp.clutch.fledged[i])<-alpha.ClutchFldg+beta.ClutchFldg*Clutch.complete.date[i]
+}
+
+# # # # # # # # # # # # # 
+# NEST SURVIVAL MODEL   #
+# # # # # # # # # # # # # 
+
+nest.surv~dunif(0,1)                             #prior for DailyNestSurvival
+
+beta.clutch~dnorm(mu.slope.c,tau.slope.c)               #prior for slope pairing
+mu.slope.c~dnorm(0,0.001)                         #superprior for Clutch completion slope
+tau.slope.c<-1/(sigma.slope.c*sigma.slope.c)      #superprior for Clutch completion slope
+sigma.slope.c~dunif(0,100)                        #superprior for Clutch completion slope
+
+for (i in 1:Nests){
+     for (t in (first.nest[i]+1):(last.nest[i])){
+          logit(phi.nest[i,t])<-nest.surv+beta.clutch*laydate[i]
+         }#t
+      }#i
+
+#### Likelihood 
+for (i in 1:Nests){
+    for(j in (first.nest[i]+1):last.nest[i]){
+        mu.nest[i,j]<-phi.nest[i,j]*nest.ch[i,j-1]
+        nest.ch[i,j]~dbern(mu.nest[i,j])
+        }#j
+     }#i
+
+# # # # # # # # # # # # # # #
+#  NUMBER OF YOUNG FLEDGED  #
+# # # # # # # # # # # # # # #
+
+# Priors 
+alpha.fledged~dnorm(mu.int.f,tau.int.f)            #priors intercept fledged
+beta.fledged~dnorm(mu.slope.f,tau.slope.f)         #priors beta fledged
+
+mu.int.f~dnorm(0,0.001)                            #superpriors intercept fledged
+tau.int.f<-1/(sigma.int.f*sigma.int.f)             #superpriors intercept fledged
+sigma.int.f~dunif(0,100)                           #superpriors intercept fledged
+
+mu.slope.f~dnorm(0,0.001)                          #superpriors beta fledged
+tau.slope.f<-1/(sigma.slope.f*sigma.slope.f)       #superpriors beta fledged
+sigma.slope.f~dunif(0,100)                         #superpriors beta fledged
+
+
+#omega ~ dbeta(3,2)
+omega ~ dunif(0.45,0.55)
+
+# Likelihood #ZIP MODEL 
+for (i in 1:nFledge){
+a[i] ~ dbern(omega)
+NumberFledged[i]~dpois(a[i]*exp.fledged[i])T(0,8)
+#NumberFledged[i]~dpois(exp.fledged[i])
+log(exp.fledged[i])<-alpha.fledged+beta.fledged*arrival.fledged[i]
+}
+
+percapfledge <- sum(NumberFledged[])/length(NumberFledged[])
+#percapfledge <- sum(exp.fledged[])/length(exp.fledged[])
+#############################################################################################################
+#
+# N-mixture model portion to estimate population size 
+#
+#############################################################################################################
+
+# Priors 
+
+mu.int.abun~dnorm(0,0.001)                           #superpriors for abundance
+tau.int.abun<-1/(sigma.int.abun*sigma.int.abun)      #superpriors for abundance
+sigma.int.abun~dunif(0,10)                           #superpriors for abundance
+
+mu.slope.abun~dnorm(0,0.001)                         #superpriors for abundance
+tau.slope.abun<-1/(sigma.slope.abun*sigma.slope.abun)#superpriors for abundance
+sigma.slope.abun~dunif(0,100)                        #superpriors for abundance
+
+tau.abun<-1/(sigma.abun*sigma.abun)                  #superpriors for abundance
+sigma.abun~dunif(0,100)                              #superpriors for abundance
+
+mu.slope.det~dnorm(0,0.001)                          #superpriors for detection
+tau.slope.det <- 1/(sigma.slope.det*sigma.slope.det) #superpriors for detection
+sigma.slope.det~dunif(0,100)                         #superpriors for detection
+
+mu.int.det~dnorm(0,0.001)                            #superpriors for detection
+tau.int.det<-1/(sigma.int.det*sigma.int.det)         #superpriors for detection
+sigma.int.det~dunif(0,100)                           #superpriors for detection
+
+#alpha~dnorm(mu.int.abun,tau.int.abun)   
+alpha~dnorm(0,0.001)                                 #intercept for abundance model
+beta~dnorm(mu.slope.abun,tau.slope.abun)             #beta for abundance model
+
+pInt~dnorm(mu.int.det,tau.int.det)                   #intercept for detection model 
+
+for(n in 1:2){
+betaP[n] ~ dnorm(mu.slope.det,tau.slope.det)         #betas for the detection model
+}
+
+eps~dnorm(0,0.001)                                   #error
+
+
+# Estimate Juv. Survival 
+JuvSurv <- 1/(1+exp(-logit.phij))
+phij ~ dunif(-0.9,0) # biologically likely juv survival corresponds to approx 0.3-0.5 published estimates
+logit.phij <- phij
+
+# ABUNDANCE MODEL 
+#############################################################################################################
+#
+#  Likelihood
+#
+#############################################################################################################
+   for(i in 1:nschwarz) {                       # Schwarz Plot
+
+       N[i,1] ~ dpois(lambda[i,1])T(0,10)
+
+       lambda[i,1]<-exp(alpha+
+                        beta*Elev[i]+
+                        eps)                                                                        
+
+   	for(j in 1:nreps) {                        # Replicates
+     	    y[i,j,1] ~ dbin(N.p[i,j,1], N[i,1]) 
+     	    N.p[i,j,1]<-1/(1+exp(-logit.p[i,j,1]))
+     	    logit.p[i,j,1]<-pInt+
+                       	    betaP[1]*time[i,j,1]+
+                       	    betaP[2]*date[i,j,1]
+                            
+} #REPS
+
+#######################################################
+for(k in 2:nyears) {  
+
+S[i,k-1] ~ dbin(mean.phi,N[i,k-1])    # Survival
+
+G[i,k-1] ~ dpois(Gamma[i,k-1])T(0,10) # Recruits
+
+#recruits.ha[i,k-1]<-G[i,k-1]/(area/10000)
+
+Gamma[i,k-1] <- N[i,k-1]*
+                ((0.5*percapfledge)*pow(nest.surv,24)*(1+Renest-pow(nest.surv,24)*Renest+DoubleBrood)*mean.pair)*JuvSurv
+
+N[i,k] ~ dpois(Npred[i,k])T(0,10)
+
+Npred[i,k] <- S[i,k-1] + G[i,k-1]
+
+for(j in 1:nreps) {                        # Replicates
+
+    y[i,j,k] ~ dbin(N.p[i,j,k], N[i,k]) 
+
+    N.p[i,j,k]<-1/(1+exp(-logit.p[i,j,k]))
+
+    logit.p[i,j,k]<-pInt+
+                    betaP[1]*time[i,j,k]+
+                    betaP[2]*date[i,j,k]
+          } #REPS
+       } # Years
+   }        # SITES
+   
+#####
+# Population growth rate, Mean population growth rate
+for(i in 1:nschwarz){
+          for(k in 2:nyears){
+            lambda.est[i,k-1] <- (N[i,k]+0.0001)/(N[i,k-1]+0.0001) #add small amount so that not dividing by zero
+            loglambda[i,k-1] <- log(lambda.est[i,k-1])
+         } # Years 
+          mean.lambda[i] <- exp((1/(nyears-1))*sum(loglambda[i,]))  # Mean growth rate
+	} # Sites
+for(k in 2:nyears){
+growth[k-1] <- sum(N[,k])/sum(N[,k-1])
+}
+mean.growth <- mean(lambda.est[,])
+##################################################
+# P R E D I C T I O N S                          #
+##################################################
+n.int <- 1000
+for(i in 1:length(n.arrival)){
+
+# Pairing success #
+new.pair[i] <- 1/(1+exp(-(alpha.pair+beta.pair*n.arrival[i])))
+d.new.pair[i] <- 1/(1+exp(-(alpha.pair+beta.pair*sim.arrival[i])))
+
+# Clutch Completion # 
+new.clutch[i] <- alpha.FstClutch+beta.FstClutch*n.arrival[i]
+d.new.clutch[i] <- alpha.FstClutch+beta.FstClutch*sim.arrival[i]
+
+st.clutch[i] <- (new.clutch[i]-mean(ClutchComplete))/sd(ClutchComplete)
+d.st.clutch[i] <- (d.new.clutch[i]-mean(ClutchComplete))/sd(ClutchComplete)
+
+# DNS #
+new.dns[i] <- 1/(1+exp(-(nest.surv+beta.clutch*st.clutch[i])))
+d.new.dns[i] <- 1/(1+exp(-(nest.surv+beta.clutch*d.st.clutch[i])))
+
+# Fledged #
+n.a[i]~dbern(new.pair[i])
+d.n.a[i]~dbern(d.new.pair[i])
+
+new.fledged[i] <- exp(alpha.fledged+beta.fledged*n.arrival[i])*n.a[i]
+d.new.fledged[i] <- exp(alpha.fledged+beta.fledged*sim.arrival[i])*d.n.a[i]
+
+n2[i,1] <- n.int*(((0.5*new.fledged[i])*new.dns[i]*(1+Renest-new.dns[i]*Renest+DoubleBrood)*new.pair[i])*JuvSurv)
+new.lambda[i,1] <- (n2[i,1]+(n.int*mean.phi))/n.int
+
+# Just pairing success
+n2[i,2] <- n.int*(((0.5*percapfledge)*new.dns[i]*(1+Renest-new.dns[i]*Renest+DoubleBrood)*new.pair[i])*JuvSurv)
+new.lambda[i,2] <- (n2[i,2]+(n.int*mean.phi))/n.int
+
+# Just fledge success
+n.b[i]~dbern(mean.pair)
+new.fledged1[i] <- exp(alpha.fledged+beta.fledged*n.arrival[i])*n.b[i]
+
+n2[i,3] <- n.int*(((0.5*new.fledged1[i])*new.dns[i]*(1+Renest-new.dns[i]*Renest+DoubleBrood)*mean.pair)*JuvSurv)
+new.lambda[i,3] <- (n2[i,3]+(n.int*mean.phi))/n.int
+
+n2[i,4] <- n.int*(((0.5*d.new.fledged[i])*d.new.dns[i]*(1+Renest-d.new.dns[i]*Renest+DoubleBrood)*d.new.pair[i])*JuvSurv)
+new.lambda[i,4] <- (n2[i,4]+(n.int*mean.phi))/n.int
+
+} 
+}
